@@ -1,24 +1,24 @@
 # AGI-saber
 
-agi时代的个人办公智能助手
+面向日常办公任务的个人 AI 助手。
 
-后端是 `cmd/server/main.go`，提供认证、SSE 对话、知识库、记忆、工具、Skill、文档库和状态接口；前端在 `web/`，使用 Vite + Vue 3 + Pinia。后端不再托管前端静态文件，开发时分别启动。
+服务由 Go API 和独立 Web 界面组成。API 入口位于 `cmd/server/main.go`，负责账号认证、SSE 对话、知识检索、记忆、工具、Skill、文档及运行状态；`web/` 下是基于 Vite、Vue 3 和 Pinia 的前端。开发环境需要分别运行前后端。
 
 ## 当前能力
 
-- 账号体系：注册、登录、JWT 鉴权；除健康检查和登录注册外，业务接口都需要 token。
-- 流式对话：`/api/chat/stream` 使用 SSE 推送 route、step、token、done 等事件。
-- ReAct 图执行：Planner 生成任务图，GraphRuntime 支持并行执行、竞速、重试、快照和失败后 replan。
-- RAG 知识库：支持文本、PDF 等文档上传；Milvus 语义检索、Elasticsearch BM25、Neo4j 图检索可用时会融合，不可用时降级。
-- 三层记忆：短期会话、长期记忆、用户偏好；长期记忆带合并、去重、衰减、隔离和 superseded 查询。
-- 子 Agent：`research_agent`、`writer_agent`、`review_agent`、`doc_agent`，用于知识增强报告和文档保存流水线。
-- 文档库：可写入 Markdown 文档、查询文档、删除/重新入库 RAG。
-- 工具系统：内置 `search_web`，支持 MCP HTTP 工具注册；普通对话默认进入 ReAct loop。
-- Skill 广场：内置办公 prompt skill，支持从 GitHub 搜索结果安装 prompt skill。
-- 沙箱产物：支持 Docker / local / mock 后端，为复杂任务准备宿主机产物目录。
-- 基础设施降级：PostgreSQL、Milvus、Elasticsearch、Kafka、Neo4j 均按连接状态降级；核心服务可启动，但部分能力会受限。
+- 账号与访问控制：提供注册、登录和 JWT 校验。健康检查以及注册、登录接口不要求 token，其余业务请求需要通过认证。
+- SSE 对话：客户端可从 `/api/chat/stream` 持续接收 route、step、token、done 等阶段事件。
+- 任务编排：Planner 把请求拆成任务图，GraphRuntime 负责并发调度、竞速、失败重试、状态快照，以及必要时重新规划。
+- 检索增强：可以上传文本、PDF 等资料。Milvus、Elasticsearch 和 Neo4j 分别承担语义、BM25 和图检索；服务可用时合并检索结果，连接不可用时按配置降级。
+- 用户记忆：覆盖当前会话、长期信息和偏好设置。长期记忆提供合并、去重、衰减、隔离及 superseded 记录查询。
+- Agent 协作：`research_agent`、`writer_agent`、`review_agent` 与 `doc_agent` 串接知识收集、写作、审阅和文档保存。
+- 文档管理：支持保存和查阅 Markdown 文档，也可以删除文档对应的 RAG 数据或重新执行入库。
+- 外部工具：默认提供 `search_web`，并允许登记 MCP HTTP 工具。常规聊天请求默认交给 ReAct loop 处理。
+- Skill：包含办公类 prompt skill，并能从 GitHub 搜索结果中安装其他 prompt skill。
+- 任务产物：沙箱可选择 Docker、local 或 mock 后端，并为复杂请求准备宿主机上的产物目录。
+- 依赖容错：PostgreSQL、Milvus、Elasticsearch、Kafka 和 Neo4j 根据连接情况启用或降级。API 可以在部分依赖缺失时运行，但对应功能可能不可用。
 
-> 注意：GitHub Skill 当前不会下载或执行仓库代码。它只是把 GitHub 仓库名称和描述包装成一个 prompt skill，再由本地 LLM 完成任务。
+> GitHub Skill 的实现范围是将仓库名称和简介整理为 prompt 上下文，再交给本地 LLM 使用；目前不会克隆仓库，也不会运行其中的代码。
 
 ## 架构概览
 
@@ -101,7 +101,7 @@ export PPROF_ADMIN_TOKEN="xxx"     # 仅 observability.pprof.enabled=true 时需
 docker compose up -d
 ```
 
-会启动：
+该命令会拉起以下本地依赖：
 
 - PostgreSQL: `localhost:5432`
 - Milvus: `localhost:19530`
@@ -109,7 +109,7 @@ docker compose up -d
 - Kafka: `localhost:29092`
 - Neo4j: `localhost:7474` / `localhost:7687`
 
-只想跑最小后端也可以不启动这些服务；系统会降级，但登录、安装 Skill、持久化记忆等依赖 PostgreSQL 的能力会不可用。
+若只需启动基础 API，可以暂时不运行这些容器。服务会尝试以降级模式工作；登录注册、Skill 安装、持久化记忆等依赖 PostgreSQL 的功能将无法正常使用。
 
 ### 4. 启动后端
 
@@ -145,7 +145,7 @@ npm run dev
 http://localhost:5173
 ```
 
-`web/vite.config.js` 会把 `/api`、`/healthz`、`/readyz` 代理到 `http://localhost:8090`。
+开发服务器的 `web/vite.config.js` 已配置代理，会将 `/api`、`/healthz` 和 `/readyz` 请求转发至 `http://localhost:8090`。
 
 ## 常用命令
 
@@ -168,22 +168,22 @@ docker compose down -v
 
 ## 使用流程
 
-1. 打开前端，注册或登录账号。
-2. 普通聊天默认进入 `react` 模式，由 Planner 判断是否需要调用工具或 skill。
-3. 打开知识库开关后：
-   - 普通问答走 `rag`。
-   - 报告、方案、总结、文档类意图走 `rag_agent`，触发 research -> writer -> review -> doc 流水线。
-4. 在 Skill 广场安装 skill 后，需要在“已安装”区域打开开关，才会参与主循环。
-5. 上传文档后可用于 RAG；由 doc_agent 保存的报告也可自动写入文档库并入库 RAG。
+1. 在 Web 界面创建账号或登录。
+2. 未开启知识库时，聊天请求默认由 `react` 模式处理；Planner 会根据任务决定是否调用工具或 Skill。
+3. 启用知识库后，系统按请求类型选择路径：
+   - 一般知识问答使用 `rag`。
+   - 报告、方案、摘要和文档任务使用 `rag_agent`，依次经过 research、writer、review、doc。
+4. Skill 安装完成后，还需到“已安装”列表启用它，主循环才会加载该 Skill。
+5. 上传的资料可参与 RAG 检索。`doc_agent` 生成并保存的报告也能写入文档库，随后进入 RAG 索引。
 
 ## Skill 机制
 
-Skill 的领域模型在 `internal/domain/skill`，应用服务在 `internal/application/skill`。
+Skill 的数据模型定义在 `internal/domain/skill`，对应的应用层逻辑位于 `internal/application/skill`。
 
-当前支持两类调用：
+Skill 目前有两种调用形式：
 
-- `prompt`：把 skill 的 `PromptTemplate` 渲染成 LLM 请求。内置办公 skill 和 GitHub skill 目前都走这类。
-- `mcp`：复用外部 HTTP MCP 工具调用，当前作为扩展路径保留。
+- `prompt`：将 Skill 的 `PromptTemplate` 填充后提交给 LLM。办公 Skill 和 GitHub Skill 当前均采用此方式。
+- `mcp`：调用外部 HTTP MCP 服务，作为后续扩展能力保留。
 
 安装与调用链：
 
@@ -206,16 +206,16 @@ sequenceDiagram
   RT->>LLM: 执行 prompt skill
 ```
 
-边界说明：
+运行规则：
 
-- GitHub Skill 不执行仓库代码，只把仓库描述作为背景资料注入 prompt。
-- Skill 只有 `enabled=true` 时才会进入当前用户的 `routeTools`。
-- RAG 简单问答模式不会合并 Skill；普通 `react` loop 才会合并 Skill。
-- skill 节点属于 LLM 型工具，GraphRuntime 会放宽单步超时，避免 5 秒默认工具超时误杀。
+- GitHub Skill 仅向 prompt 提供仓库描述，不会执行仓库中的程序。
+- 只有当前用户启用的 Skill（`enabled=true`）会加入 `routeTools`。
+- Skill 会并入普通 `react` loop；单纯的 RAG 问答路径不会加载它们。
+- Skill 节点需要调用 LLM，GraphRuntime 对这类步骤使用更宽的超时，避免被普通工具默认的 5 秒限制提前终止。
 
 ## API 摘要
 
-公开接口：
+以下接口不需要登录 token：
 
 | Method | Path | 说明 |
 | --- | --- | --- |
@@ -224,7 +224,7 @@ sequenceDiagram
 | `GET` | `/healthz` | 存活检查 |
 | `GET` | `/readyz` | 就绪检查 |
 
-需要 `Authorization: Bearer <token>`：
+其他业务接口通过 `Authorization: Bearer <token>` 进行认证：
 
 | Method | Path | 说明 |
 | --- | --- | --- |
@@ -253,7 +253,7 @@ sequenceDiagram
 | `GET` | `/api/snapshots` | ReAct 任务快照 |
 | `GET` | `/api/status` | 服务状态 |
 
-SSE 事件类型主要包括：
+流式响应中常见的 SSE 事件有：
 
 - `start`
 - `route`
@@ -292,7 +292,7 @@ SSE 事件类型主要包括：
 
 ## 数据与持久化
 
-PostgreSQL 会保存：
+PostgreSQL 用于保存以下数据：
 
 - 用户和密码哈希
 - 聊天历史
@@ -303,9 +303,9 @@ PostgreSQL 会保存：
 - task snapshots
 - installed skills
 
-Milvus 保存向量索引，Elasticsearch 保存 BM25 索引，Neo4j 保存知识图谱和图增强记忆，Kafka 用于事件发布。
+向量索引由 Milvus 管理，Elasticsearch 提供 BM25 检索，Neo4j 存储知识图谱与图增强记忆，Kafka 承担事件发布。
 
-如果某个基础设施连接失败，启动不会整体失败，但相关能力会降级。例如 PostgreSQL 不可用时，登录注册、Skill 安装、记忆和文档持久化会失败或不可用。
+外部基础设施连接异常通常不会阻止服务启动，但依赖该服务的功能会受影响。比如 PostgreSQL 无法连接时，账号注册登录、Skill 安装、记忆保存和文档持久化都无法使用。
 
 ## 配置重点
 
@@ -326,14 +326,14 @@ Milvus 保存向量索引，Elasticsearch 保存 BM25 索引，Neo4j 保存知�
 
 ## 部署说明
 
-后端 Dockerfile 只打包 Go API。前端需要独立构建并由 nginx 或静态服务器托管：
+Dockerfile 生成的镜像只包含 Go API。部署前端时，请单独构建 Web 资源，并交给 nginx 或其他静态文件服务托管：
 
 ```bash
 cd web
 npm run build
 ```
 
-生产部署建议：
+生产环境可按以下方式部署：
 
 - 前端静态站点托管 `web/dist/`。
 - nginx 将 `/api`、`/healthz`、`/readyz` 反代到后端。
@@ -344,39 +344,39 @@ npm run build
 
 ## 常见问题
 
-**打开 `http://localhost:8090` 只有一句 API 提示？**
+**访问 `http://localhost:8090` 时只看到 API 提示，是否异常？**
 
-正常。后端不再托管前端，请启动 `web/` 的 Vite dev server 或部署 `web/dist/`。
+这是预期行为。前端不由 API 服务提供，请启动 `web/` 中的 Vite 开发服务器，或把 `web/dist/` 部署到静态服务器。
 
-**业务接口返回 401？**
+**为什么业务请求得到 401？**
 
-除 `/api/auth/register`、`/api/auth/login`、`/healthz`、`/readyz` 外都需要 JWT。前端登录后会自动注入 token。
+除 `/api/auth/register`、`/api/auth/login`、`/healthz` 和 `/readyz` 以外，接口都要求 JWT。登录后前端会自动附带 token。
 
-**Skill 安装了但不调用？**
+**已安装的 Skill 没有被使用？**
 
-安装后还要在已安装列表打开开关。并且只有普通 `react` loop 会合并 Skill，RAG 简单问答不会合并。
+请检查它是否已在“已安装”列表中启用。只有普通 `react` loop 会加载 Skill；RAG 简单问答不会经过这一步。
 
-**GitHub Skill 没有真实插件能力？**
+**GitHub Skill 为什么不像代码插件那样执行功能？**
 
-这是当前设计边界。GitHub Skill 只是 prompt 包装，不会 clone 仓库、不会执行仓库代码。
+当前实现只将 GitHub 仓库信息转成 prompt 上下文，不会克隆或运行仓库代码。
 
-**LLM 一直降级 mock？**
+**LLM 请求总是回退到 mock？**
 
-检查 `llm.api_key`、`llm.api_url`、模型名和网络。配置里的 `"."` 是占位符，会触发真实请求但通常失败。
+请核对 `llm.api_key`、`llm.api_url`、模型名称和网络连通性。配置中的 `"."` 仅是占位值，系统仍会发起请求，但请求通常无法成功。
 
-**RAG 结果不准或 Milvus 报维度错误？**
+**检索结果偏差较大，或 Milvus 提示向量维度不匹配？**
 
-确认 `rag.rag_milvus_dim` 与 embedding 模型输出维度一致，并在变更维度后清理旧 Milvus collection / 数据卷。
+检查 `rag.rag_milvus_dim` 是否等于 embedding 模型输出维度。若调整过维度，还需要清理旧的 Milvus collection 或数据卷。
 
 ## 测试状态
 
-当前可用：
+可通过以下命令运行后端测试：
 
 ```bash
 go test ./...
 ```
 
-前端目前没有独立单元测试脚本，至少应运行：
+前端尚未提供单独的单元测试命令，可先执行构建检查：
 
 ```bash
 cd web
@@ -385,4 +385,4 @@ npm run build
 
 ## 许可证
 
-仓库当前未声明开源许可证。对外发布或商用前请先补充 LICENSE。
+目前仓库没有附带开源许可证文件。计划公开发布或用于商业场景前，请先明确并添加 LICENSE。
